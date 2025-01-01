@@ -24,18 +24,18 @@ MedianFilter pulses(200, INITIAL_BAUD);
 
 void setup() {
   pinMode(RX_PIN, INPUT_PULLUP);  // make sure serial in is a input pin
-  digitalWrite(RX_PIN, HIGH);  // pull up enabled just for noise protection
+  //digitalWrite(RX_PIN, HIGH);  // pull up enabled just for noise protection
 #ifdef USE_INTERUPT
   delay(1000);
   // Start measurement each time PIN goes LOW
   attachInterrupt(digitalPinToInterrupt(RX_PIN), measurePulse, LOW);
 #endif
-}
+// }
 
-
-void setup1() {
+// void setup1() {
   Serial.begin(USB_BAUD);
   delay(100);
+  Serial1.setFIFOSize(128);
   Serial1.begin(baudRate);
   delay(500);
 }
@@ -50,7 +50,8 @@ void switchBaud() {
     Serial.println("<<<<<<<");
     Serial.println("");
     Serial.println("");
-  } else if (serial1Baud != baudRate) {
+  // } else if (serial1Baud != baudRate) {
+  } else {
     Serial.println("");
     Serial.println("");
     Serial.print(">>>>>>>>>>>>> Switching baud rate from ");
@@ -67,14 +68,14 @@ void switchBaud() {
   }
 }
 
-void loop1() {
-  if (lockBaud) {
-    // Redirect the outputs
-    redirectSerialToSerial(&Serial1, &Serial);
-    redirectSerialToSerial(&Serial, &Serial1);
-    //delay(10);
-  }
-}
+// void loop1() {
+//   if (lockBaud) {
+//     // Redirect the outputs
+//     redirectSerialToSerial(&Serial1, &Serial);
+//     redirectSerialToSerial(&Serial, &Serial1);
+//     //delay(10);
+//   }
+// }
 
 long lastBounce = 5000;
 long debounceTime = 1000;
@@ -90,23 +91,29 @@ void loop() {
   if (BOOTSEL && (millis() - lastBounce > debounceTime)) {
     lastBounce = millis();
     Serial.println();
-    if (lockBaud) {
+    if (!lockBaud) {
       // Start measurement each time PIN goes LOW
       detachInterrupt(digitalPinToInterrupt(RX_PIN));
       switchBaud();
-      Serial.println(">>>>>>>>>>>> BAUD LOCKED");
+      Serial.println(">>>>>>>>>>>> Switching to terminal mode");
     } else {
 
       // Start measurement each time PIN goes LOW
       attachInterrupt(digitalPinToInterrupt(RX_PIN), measurePulse, LOW);
-      Serial.println(">>>>>>>>>>>> BAUD UNLOCKED");
+      Serial.println(">>>>>>>>>>>> Switching to detect mode");
     }
     Serial.println();
     lockBaud = !lockBaud;
     digitalWrite(LED_BUILTIN, lockBaud);
   }
 
-  if (lockBaud) { return; }
+  if (lockBaud) { 
+    if (Serial1.available() > 0) Serial.write(Serial1.read());
+    if (Serial.available() > 0) Serial1.write(Serial.read());
+    //redirectSerialToSerial(&Serial1, &Serial);
+    //redirectSerialToSerial(&Serial, &Serial1);
+    return; 
+    }
 
 
 #ifdef USE_INTERUPT
