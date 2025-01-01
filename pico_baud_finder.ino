@@ -1,14 +1,4 @@
-/*
- Auto Baud Rate Detector - This arduino sketch predicts unknown uart baud rates.
- 
- Note : I'm sure characters with multible zero bits in a row may fake out proper detection. If data is
- garbled in the serial monitor then the auto baud rate function failed.
-
-Hardware connection details : 
-* Connect  uart device's GND to GND of Arduino UNO
-* Connect TX pin of uart device to RX(0th pin - D0) of Arduino UNO
- 
-*/
+#include "MedianFilter.h"
 
 #define USE_INTERUPT
 #define RATE_SAMPLES 20
@@ -19,7 +9,6 @@ Hardware connection details :
 
 
 
-#include "MedianFilter.h"
 
 long baudRate = INITIAL_BAUD;
 long serial1Baud = baudRate;
@@ -33,12 +22,9 @@ bool lockBaud = false;
 MedianFilter pulses(200, INITIAL_BAUD);
 #endif
 
-//SerialBT SerialBlueT;
-
-// TODO: Swap setup and setup1
 void setup() {
   pinMode(RX_PIN, INPUT_PULLUP);  // make sure serial in is a input pin
-  //digitalWrite(RX_PIN, HIGH);  // pull up enabled just for noise protection
+  digitalWrite(RX_PIN, HIGH);  // pull up enabled just for noise protection
 #ifdef USE_INTERUPT
   delay(1000);
   // Start measurement each time PIN goes LOW
@@ -46,21 +32,16 @@ void setup() {
 #endif
 }
 
-// TODO: Swap setup1 and setup
+
 void setup1() {
   Serial.begin(USB_BAUD);
-  //Serial1.setFIFOSize(128);
-  //Serial1.setPollingMode(true);
-  delay(1000);
+  delay(100);
   Serial1.begin(baudRate);
+  delay(500);
 }
 
-// TODO: Swap loop1 and loop
-void loop1() {
-  if (millis() < 10000) {
-    Serial.print("Waiting for data to be sampled...");
-    Serial.println(millis());
-  } else if (baudRate == -1) {
+void switchBaud() {
+  if (baudRate == -1) {
     Serial.println("");
     Serial.println("");
     Serial.println(">>>>>> UNABLE TO DETECT BAUD <<<<<<<");
@@ -69,48 +50,62 @@ void loop1() {
     Serial.println("<<<<<<<");
     Serial.println("");
     Serial.println("");
-    return;
   } else if (serial1Baud != baudRate) {
-    if (debug) {
-      Serial.println("");
-      Serial.println("");
-      Serial.print(">>>>>>>>>>>>> Switching baud rate from ");
-      Serial.print(serial1Baud);
-      Serial.print(" to ");
-      Serial.println(baudRate);
-      Serial.println("");
-      Serial.println("");
-    }
+    Serial.println("");
+    Serial.println("");
+    Serial.print(">>>>>>>>>>>>> Switching baud rate from ");
+    Serial.print(serial1Baud);
+    Serial.print(" to ");
+    Serial.println(baudRate);
+    Serial.println("");
+    Serial.println("");
     serial1Baud = baudRate;
-    //delay(500);
-    //Serial.flush();
-    //Serial1.flush();
     Serial1.end();
     Serial.end();
-    // delay(500);
     Serial.begin();
     Serial1.begin(serial1Baud);
-    delay(100);
-  } else if (!debug) {
-    // Redirect the outputs
-    redirectSerialToSerial(&Serial1, &Serial);
-    redirectSerialToSerial(&Serial, &Serial1);
   }
 }
 
-// TODO: Swap loop and loop1
+void loop1() {
+  if (lockBaud) {
+    // Redirect the outputs
+    redirectSerialToSerial(&Serial1, &Serial);
+    redirectSerialToSerial(&Serial, &Serial1);
+    //delay(10);
+  }
+}
+
+long lastBounce = 5000;
+long debounceTime = 1000;
 void loop() {
 
+  if (millis() < 5000) {
+    Serial.print("Waiting for data to be sampled...");
+    Serial.println(millis());
+    return;
+  }
+
   // Enable baud locking, simply exit loop early if lockBaud is true
-  if (BOOTSEL) {
+  if (BOOTSEL && (millis() - lastBounce > debounceTime)) {
+    lastBounce = millis();
+    Serial.println();
+    if (lockBaud) {
+      // Start measurement each time PIN goes LOW
+      detachInterrupt(digitalPinToInterrupt(RX_PIN));
+      switchBaud();
+      Serial.println(">>>>>>>>>>>> BAUD LOCKED");
+    } else {
+
+      // Start measurement each time PIN goes LOW
+      attachInterrupt(digitalPinToInterrupt(RX_PIN), measurePulse, LOW);
+      Serial.println(">>>>>>>>>>>> BAUD UNLOCKED");
+    }
+    Serial.println();
     lockBaud = !lockBaud;
     digitalWrite(LED_BUILTIN, lockBaud);
-    Serial.println();
-    if (lockBaud) Serial.println(">>>>>>>>>>>> BAUD LOCKED");
-    else Serial.println(">>>>>>>>>>>> BAUD UNLOCKED");
-    Serial.println();
-    delay(1000);
   }
+
   if (lockBaud) { return; }
 
 
@@ -134,14 +129,15 @@ void loop() {
   baudRate = calculateBaud(rate);
 #endif
 
-  if (debug) {
-    Serial.print("Calculated_Baud:");
-    Serial.println(calculateBaud(rate));
-    Serial.print("Rate:");
-    Serial.println(rate);
-    Serial.print("Approximate_Baud:");
-    Serial.println(approximateBaud(rate));
-  }
+  Serial.print("============================ ");
+  Serial.print(millis());
+  Serial.println(" ============================");
+  Serial.print("Calculated_Baud:");
+  Serial.println(calculateBaud(rate));
+  Serial.print("Rate:");
+  Serial.println(rate);
+  Serial.print("Approximate_Baud:");
+  Serial.println(approximateBaud(rate));
 }
 
 long approximateBaud(long rate) {
@@ -200,60 +196,15 @@ long calculateBaud(long rate) {
   else if (rate >= 3 && rate < 10) return 115200;
   //else if (rate >= 1 && rate < 3) return 230400;
   else return -1;
-
-/*
-  long baud = 0;
-
-  if (rate < 2)
-    baud = 614400;  // (1.62760254)
-  else if (rate < 3)
-    baud = 460800;  // (2.17013672)
-  else if (rate < 6)
-    baud = 230400;  // (4.34027344) 3-5, odd jump to 13?
-  else if (rate < 15)
-    baud = 115200;  // (8.68) 6-9
-  else if (rate < 20)
-    baud = 57600;  //16-17 (17.36)
-  else if (rate < 29)
-    baud = 38400;  // 25 - 26 (26.04)
-  else if (rate < 40)
-    baud = 28800;  // (34.7221875)
-  else if (rate < 60)
-    baud = 19200;  // (52.08328125) 50-52
-  else if (rate < 80)
-    baud = 14400;  // (69.444375) 66-70
-  else if (rate < 120)
-    baud = 9600;  // (104.1665625) 103-104
-  else if (rate < 150)
-    baud = 7200;  // (138.88875) 138-139
-  else if (rate < 260)
-    baud = 4800;  // (208.333125) 206-209
-  else if (rate < 300)
-    baud = 3600;  // (277.7775) - 274-278
-  else if (rate < 600)
-    baud = 2400;  // (416.66625) - 415-417
-  else if (rate < 1200)
-    baud = 1200;  // (833.3325) 832-834
-  else if (rate < 2400)
-    baud = 600;  // (1666.665) - 1666
-  else if (rate < 4800)
-    baud = 300;  // (3333.33) - 3333
-  else
-    baud = 0;
-
-  return baud;*/
 }
 
 
 #ifdef USE_INTERUPT
 void measurePulse() {
-  //long value = pulseIn(RX_PIN, LOW);
-  //if (value > 0) 
   pulses.in(pulseIn(RX_PIN, LOW));
 }
 #else
 long detRate(int recpin) {
-
   MedianFilter values(NUM_SAMPLES, 0);
 
   for (int i = 0; i < NUM_SAMPLES; i++) {
