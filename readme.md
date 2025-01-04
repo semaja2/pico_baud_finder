@@ -42,5 +42,7 @@ The below rates were observed from collecting the rates measured during known ba
 ## Known issues
 In terminal mode it observes frequent noise/garbage resulting, it is best to use detect mode to find baud and then switch to a proper UART adapter until resolved.
 
+Detection of rates above 115200 is unstable as pulseIn currently measures microseconds without float precision, as such higher baud rates all blend into the 1-5 range, if pulseIn can measure with float it may be possible to add higher baud detection
+
 ## Future ideas
  - Reimplement combined mode with detection occuring on core1 and terminal occuring on core2, allowing for simpler operation
