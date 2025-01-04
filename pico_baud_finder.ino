@@ -1,44 +1,78 @@
+/*
+
+Project Name: pico baud finder
+Project Author: semaja2
+
+*/
+
+
 #include "MedianFilter.h"
 
-#define USE_INTERUPT
-#define RATE_SAMPLES 20
-#define NUM_SAMPLES 50
+// Set initial baud for terminal
 #define INITIAL_BAUD 9600
+
+// Set USB Serial Baud rate, not needed on RP2040
 #define USB_BAUD 230400
+
+// Set the UART RX pin to run detect mode, should match "Serial1" pin
 #define RX_PIN 1
 
-
-
-
 long baudRate = INITIAL_BAUD;
-long serial1Baud = baudRate;
-
 long prevRate = 0;
+bool terminalMode = false;
+long lastBounce = WARMUP;
 
-bool debug = false;
-bool lockBaud = false;
-
-#ifdef USE_INTERUPT
 MedianFilter pulses(200, INITIAL_BAUD);
-#endif
 
 void setup() {
-  pinMode(RX_PIN, INPUT_PULLUP);  // make sure serial in is a input pin
-  //digitalWrite(RX_PIN, HIGH);  // pull up enabled just for noise protection
-#ifdef USE_INTERUPT
-  delay(1000);
-  // Start measurement each time PIN goes LOW
-  attachInterrupt(digitalPinToInterrupt(RX_PIN), measurePulse, LOW);
-#endif
-// }
-
-// void setup1() {
   Serial.begin(USB_BAUD);
   delay(100);
-  Serial1.setFIFOSize(128);
+  switchToDetectMode();
+  Serial1.setFIFOSize(1024); // Increase FIFO buffer
   Serial1.begin(baudRate);
   delay(500);
 }
+
+void loop() {
+
+  // Enable baud locking, simply exit loop early if terminalMode is true
+  if (BOOTSEL && (millis() - lastBounce > 1000)) {
+    lastBounce = millis();
+    if (!terminalMode) {
+      switchToTerminalMode();
+    } else {
+      switchToDetectMode();
+    }
+    digitalWrite(LED_BUILTIN, terminalMode);
+  }
+
+  if (terminalMode) {
+    if (Serial1.available() > 0) Serial.write(Serial1.read());
+    if (Serial.available() > 0) Serial1.write(Serial.read());
+    return;
+  } else {
+    long rate = pulses.getMin();
+
+    // Check if rate has changed, if it has recalculate
+    if (rate != prevRate) {
+      prevRate = rate;
+
+      // Calculate the likely baudRate
+      if (rate > 0) { baudRate = calculateBaud(rate); }
+
+      Serial.print("============================ ");
+      Serial.print(millis());
+      Serial.println(" ============================");
+      Serial.print("Calculated_Baud:");
+      Serial.println(calculateBaud(rate));
+      Serial.print("Rate:");
+      Serial.println(rate);
+      Serial.print("Approximate_Baud:");
+      Serial.println(approximateBaud(rate));
+    }
+  }
+}
+
 
 void switchBaud() {
   if (baudRate == -1) {
@@ -48,142 +82,45 @@ void switchBaud() {
     Serial.print(">>>>>> APPROX BAUD: ");
     Serial.print(approximateBaud(prevRate));
     Serial.println("<<<<<<<");
+    Serial.println("Returning to detect mode");
     Serial.println("");
     Serial.println("");
-  // } else if (serial1Baud != baudRate) {
   } else {
     Serial.println("");
     Serial.println("");
-    Serial.print(">>>>>>>>>>>>> Switching baud rate from ");
-    Serial.print(serial1Baud);
-    Serial.print(" to ");
+    Serial.print("Setting up terminal mode with baud ");
     Serial.println(baudRate);
     Serial.println("");
     Serial.println("");
-    serial1Baud = baudRate;
+
+    //Reset serial interfaces and setup new baud
     Serial1.end();
     Serial.end();
     Serial.begin();
-    Serial1.begin(serial1Baud);
+    Serial1.begin(baudRate);
   }
 }
 
-// void loop1() {
-//   if (lockBaud) {
-//     // Redirect the outputs
-//     redirectSerialToSerial(&Serial1, &Serial);
-//     redirectSerialToSerial(&Serial, &Serial1);
-//     //delay(10);
-//   }
-// }
+void switchToDetectMode() {
+  terminalMode = false;
+  pinMode(RX_PIN, INPUT_PULLUP);  // make sure serial in is a input pin
+  // Start measurement each time PIN goes LOW
+  attachInterrupt(digitalPinToInterrupt(RX_PIN), measurePulse, LOW);
+  Serial.println(">>>>>>>>>>>> Switching to detect mode");
+}
 
-long lastBounce = 5000;
-long debounceTime = 1000;
-void loop() {
-
-  if (millis() < 5000) {
-    Serial.print("Waiting for data to be sampled...");
-    Serial.println(millis());
-    return;
-  }
-
-  // Enable baud locking, simply exit loop early if lockBaud is true
-  if (BOOTSEL && (millis() - lastBounce > debounceTime)) {
-    lastBounce = millis();
-    Serial.println();
-    if (!lockBaud) {
-      // Start measurement each time PIN goes LOW
-      detachInterrupt(digitalPinToInterrupt(RX_PIN));
-      switchBaud();
-      Serial.println(">>>>>>>>>>>> Switching to terminal mode");
-    } else {
-
-      // Start measurement each time PIN goes LOW
-      attachInterrupt(digitalPinToInterrupt(RX_PIN), measurePulse, LOW);
-      Serial.println(">>>>>>>>>>>> Switching to detect mode");
-    }
-    Serial.println();
-    lockBaud = !lockBaud;
-    digitalWrite(LED_BUILTIN, lockBaud);
-  }
-
-  if (lockBaud) { 
-    if (Serial1.available() > 0) Serial.write(Serial1.read());
-    if (Serial.available() > 0) Serial1.write(Serial.read());
-    //redirectSerialToSerial(&Serial1, &Serial);
-    //redirectSerialToSerial(&Serial, &Serial1);
-    return; 
-    }
-
-
-#ifdef USE_INTERUPT
-  long rate = pulses.getMin();
-
-  // Check if the current rate is the same as last, if it has not changed exit loop
-  if (rate == prevRate) return;
-  prevRate = rate;
-
-  // Calculate the likely baudRate
-  if (rate > 0) { baudRate = calculateBaud(rate); }
-#else
-  MedianFilter rates(RATE_SAMPLES, 0);
-  for (int i = 0; i < RATE_SAMPLES; i++) {
-    long value = detRate(RX_PIN);
-    rates.in(value);
-  }
-
-  long rate = rates.getMin();
-  baudRate = calculateBaud(rate);
-#endif
-
-  Serial.print("============================ ");
-  Serial.print(millis());
-  Serial.println(" ============================");
-  Serial.print("Calculated_Baud:");
-  Serial.println(calculateBaud(rate));
-  Serial.print("Rate:");
-  Serial.println(rate);
-  Serial.print("Approximate_Baud:");
-  Serial.println(approximateBaud(rate));
+void switchToTerminalMode() {
+  // Start measurement each time PIN goes LOW
+  detachInterrupt(digitalPinToInterrupt(RX_PIN));
+  switchBaud();
+  Serial.println(">>>>>>>>>>>> Switching to terminal mode");
+  terminalMode = true;
 }
 
 long approximateBaud(long rate) {
   return 1 / (rate * 0.000001);
 }
 
-
-void redirectSerialToSerial(Stream *input, Stream *output) {
-  if (input->available() > 0)
-    output->write(input->read());
-}
-
-void redirectSerialToOutput1AndOutput2(Stream *input, Stream *output1, Stream *output2) {
-  if (input->available() > 0) {
-    int byte = input->read();
-    output1->write(byte);
-    output2->write(byte);
-  }
-}
-
-
-// KNOWN BAUDS
-// | Baud   | Rate Range  |
-// | 300    | 3333        |
-// | 600    | 1666-1667   |
-// | 1200   | 832-834     |
-// | 2400   | 415-417     |
-// | 3600   | 274-278     |
-// | 4800   | 206-209     |
-// | 7200   | 138-139     |
-// | 9600   | 103-104     |
-// | 14400  | 65-70       |
-// | 19200  | 50-52       |
-// | 28800  |             |
-// | 38400  | 25-26       |
-// | 57600  | 16-17       |
-// | 115200 | 6-9         |
-// | 230400 | 3-5         |
-// | 460800 | Unstable    |
 
 // Returns -1 if it cant find a result
 long calculateBaud(long rate) {
@@ -206,20 +143,6 @@ long calculateBaud(long rate) {
 }
 
 
-#ifdef USE_INTERUPT
 void measurePulse() {
   pulses.in(pulseIn(RX_PIN, LOW));
 }
-#else
-long detRate(int recpin) {
-  MedianFilter values(NUM_SAMPLES, 0);
-
-  for (int i = 0; i < NUM_SAMPLES; i++) {
-    while (digitalRead(recpin) == HIGH) {}  // wait for low bit to start
-    long value = pulseIn(recpin, LOW);
-    if (value > 0) values.in(value);
-  }
-
-  return values.out();
-}
-#endif
