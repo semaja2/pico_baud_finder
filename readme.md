@@ -8,6 +8,8 @@ Once a baud is found it is possible to switch to a terminal mode which will set 
 ## Why
 It seemed like a fun problem to solve, and removes the need for a logic analyser or brute forcing baud rates when investigating UART on unknown devices.
 
+Credit to AMAL for the original Arduino code and concept (https://www.electronicsforu.com/electronics-projects/hardware-diy/uart-automatic-baud-rate-detector)
+
 ## How to use
 Upon powering the device it will run in detect mode, monitoring the serial output over USB will show calculated baud rates.
 
